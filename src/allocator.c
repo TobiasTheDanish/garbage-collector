@@ -1,75 +1,75 @@
 #include "allocator.h"
-#include <c++/11/bits/fs_fwd.h>
-#include <stdio.h>
+#include <errno.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
 
-typedef struct {
-	bool alloced;
-	size_t parent_index;
+typedef struct CHUNK {
+  void *start;
+  size_t size;
+  struct CHUNK *next;
 } chunk_t;
 
+static size_t CHUNK_SIZE = 8;
+static size_t CHUNK_NUM = 1024;
+static chunk_t *free_chunks = NULL;
 
-#define MEM_CHUNKS 1024
-static chunk_t mem_chunks[MEM_CHUNKS] = {0};
-static long memory[MEM_CHUNKS] = {0};
+void init() {
+  void *start = mmap(NULL, CHUNK_NUM, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
-void* alloc(size_t bytes) {
-	size_t alloc_chunks = bytes / 8;
-	if (bytes % 8 > 0) {
-		alloc_chunks++;
-	}
+  if ((void *)-1 == start) {
+    printf("Could not map memory: %s\n", strerror(errno));
+  }
 
-	long offset = -1;
-	size_t free_chunks = 0;
-	for(size_t i = 0; i < MEM_CHUNKS; i++) {
-		if (!mem_chunks[i].alloced && free_chunks == 0) {
-			offset = i;
-			free_chunks++;
-		} else if (mem_chunks[i].alloced) {
-			offset = -1;
-			free_chunks = 0;
-		} else {
-			free_chunks++;
-		}
+  chunk_t root = {
+      .start = start,
+      .size = CHUNK_NUM,
+      .next = NULL,
+  };
 
-		if (free_chunks == alloc_chunks) {
-			break;
-		}
-	}
+  free_chunks = mmap(NULL, sizeof(chunk_t), PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
-	if (offset == -1) {
-		return NULL;
-	}
+  if ((void *)-1 == free_chunks) {
+    printf("Could not map memory: %s\n", strerror(errno));
+  }
 
-	for(size_t i = offset; (i - offset) < alloc_chunks; i++) {
-		mem_chunks[i].alloced = true;
-		mem_chunks[i].parent_index = offset;
-	}
+  printf("free_chunks: %p, root: %p, root->start: %p\n", free_chunks, &root,
+         root.start);
 
-	return (void*)memory + offset;
+  memcpy(free_chunks, &root, sizeof(chunk_t));
 }
 
-void free(void* ptr) {
-	size_t offset = ptr-(void*)memory;
+void *alloc(size_t bytes) {
+  if (free_chunks == NULL) {
+    init();
+  }
 
-	size_t i = offset;
-	while (mem_chunks[i].alloced && mem_chunks[i].parent_index == offset) {
-		mem_chunks[i].alloced = false;
-		mem_chunks[i].parent_index = 0;
-		memory[i] = 0;
-		i++;
-	}
+  chunk_t current = free_chunks[0];
+
+  while (1) {
+    if (bytes > current.size) {
+      if (current.next == NULL) {
+        printf("[ERROR]: Could not find a fitting block to allocate to\n");
+        exit(1);
+      }
+
+      current = *current.next;
+    } else {
+      printf("We found a chunk big enough\n");
+      break;
+    }
+  }
+
+  return current.start;
 }
+
+void free(void *ptr) { printf("Free %p\n", ptr); }
 
 int main() {
-	printf("memory: %p, size: %zu\n", memory, sizeof(memory));
-
-	void* mem1 = alloc(24);
-	alloc(20);
-	free(mem1);
-	alloc(18);
-	void* mem = alloc(16);
-	alloc(8);
-	free(mem);
-	alloc(34);
+  void *mem1 = alloc(24);
+  free(mem1);
 }
