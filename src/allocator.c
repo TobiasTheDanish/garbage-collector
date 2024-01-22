@@ -1,75 +1,87 @@
 #include "allocator.h"
-#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/mman.h>
 
+#define CHUNK_SIZE 8
+#define CHUNK_NUM 1024
+#define MEMORY_CAP 640000
+
 typedef struct CHUNK {
-  void *start;
+  char *start;
   size_t size;
-  struct CHUNK *next;
 } chunk_t;
 
-static size_t CHUNK_SIZE = 8;
-static size_t CHUNK_NUM = 1024;
-static chunk_t *free_chunks = NULL;
+typedef struct {
+  size_t count;
+  chunk_t chunks[CHUNK_NUM];
+} chunk_list_t;
 
-void init() {
-  void *start = mmap(NULL, CHUNK_NUM, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+char memory[MEMORY_CAP] = {0};
+chunk_list_t free_chunks = {
+    .count = 1, .chunks = {[0] = {.start = memory, .size = MEMORY_CAP}}};
+chunk_list_t alloced_chunks = {.count = 0, .chunks = {0}};
 
-  if ((void *)-1 == start) {
-    printf("Could not map memory: %s\n", strerror(errno));
+void chunk_list_dump(const chunk_list_t *list) {
+  printf("Chunks: %zu\n", list->count);
+  for (size_t i = 0; i < list->count; i++) {
+    const chunk_t current = list->chunks[i];
+    printf("#%zu: start: %p, size: %zu\n", i + 1, current.start, current.size);
   }
+}
 
-  chunk_t root = {
-      .start = start,
-      .size = CHUNK_NUM,
-      .next = NULL,
-  };
-
-  free_chunks = mmap(NULL, sizeof(chunk_t), PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-
-  if ((void *)-1 == free_chunks) {
-    printf("Could not map memory: %s\n", strerror(errno));
+void chunk_list_remove(chunk_list_t *list, size_t index) {
+  while (index < list->count) {
+    memmove(&list->chunks[index], &list->chunks[index + 1], sizeof(chunk_t));
+    index += 1;
   }
-
-  printf("free_chunks: %p, root: %p, root->start: %p\n", free_chunks, &root,
-         root.start);
-
-  memcpy(free_chunks, &root, sizeof(chunk_t));
+  list->count -= 1;
 }
 
 void *alloc(size_t bytes) {
-  if (free_chunks == NULL) {
-    init();
-  }
+  if (bytes > 0) {
+    size_t chunks = bytes / CHUNK_SIZE;
 
-  chunk_t current = free_chunks[0];
+    if (bytes % CHUNK_SIZE > 0)
+      chunks += 1;
+    size_t alloced_size = chunks * CHUNK_SIZE;
 
-  while (1) {
-    if (bytes > current.size) {
-      if (current.next == NULL) {
-        printf("[ERROR]: Could not find a fitting block to allocate to\n");
-        exit(1);
+    for (size_t i = 0; i < free_chunks.count; i++) {
+      chunk_t current = free_chunks.chunks[i];
+      if (current.size >= alloced_size) {
+        void *ptr = current.start;
+        alloced_chunks.chunks[alloced_chunks.count].start = current.start;
+        alloced_chunks.chunks[alloced_chunks.count].size = alloced_size;
+        alloced_chunks.count += 1;
+
+        if (current.size > alloced_size) {
+          size_t tail = current.size - alloced_size;
+          free_chunks.chunks[i].start = current.start + alloced_size;
+          free_chunks.chunks[i].size = tail;
+        } else {
+          chunk_list_remove(&free_chunks, i);
+        }
+
+        return ptr;
       }
-
-      current = *current.next;
-    } else {
-      printf("We found a chunk big enough\n");
-      break;
     }
   }
 
-  return current.start;
+  return NULL;
 }
 
 void free(void *ptr) { printf("Free %p\n", ptr); }
 
 int main() {
-  void *mem1 = alloc(24);
-  free(mem1);
+  for (size_t i = 1; i < 20; i++) {
+    void *mem = alloc(i);
+    if (i % 2 == 0)
+      free(mem);
+  }
+
+  chunk_list_dump(&alloced_chunks);
+  chunk_list_dump(&free_chunks);
 }
