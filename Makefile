@@ -1,4 +1,5 @@
 CFLAGS = -c -g -Wall -Wextra
+LINKFLAGS = -lm
 
 SOURCEDIR = src
 BUILDDIR = build
@@ -8,7 +9,7 @@ SOURCES = $(wildcard $(SOURCEDIR)/*.c)
 OBJECTS = $(patsubst $(SOURCEDIR)/%.c,$(BUILDDIR)/%.o,$(SOURCES))
 
 $(EXEC): $(OBJECTS)
-	$(CC) $^ -o $@ $(SDL2FLAGS) 
+	$(CC) $^ -o $@ $(LINKFLAGS) 
 
 $(OBJECTS): $(BUILDDIR)/%.o : $(SOURCEDIR)/%.c
 	$(CC) $(CFLAGS) -o $@ $<
