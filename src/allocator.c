@@ -22,7 +22,8 @@ typedef struct {
 char memory[MEMORY_CAP] = {0};
 chunk_list_t free_chunks = {
     .count = 1, .chunks = {[0] = {.start = memory, .size = MEMORY_CAP}}};
-chunk_list_t alloced_chunks = {.count = 0, .chunks = {0}};
+
+chunk_list_t alloced_chunks = {.count = 0};
 
 void chunk_list_dump(const chunk_list_t *list) {
   printf("Chunks: %zu\n", list->count);
@@ -32,12 +33,78 @@ void chunk_list_dump(const chunk_list_t *list) {
   }
 }
 
+int chunk_list_insert(chunk_list_t *list, char *start, size_t size) {
+  list->chunks[list->count].start = start;
+  list->chunks[list->count].size = size;
+
+  size_t i = list->count;
+  for (; i > 0 && list->chunks[i - 1].start > list->chunks[i].start; i--) {
+    const chunk_t tmp = {.start = list->chunks[i].start,
+                         .size = list->chunks[i].size};
+
+    list->chunks[i].start = list->chunks[i - 1].start;
+    list->chunks[i].size = list->chunks[i - 1].size;
+
+    list->chunks[i - 1].start = tmp.start;
+    list->chunks[i - 1].size = tmp.size;
+  }
+
+  list->count += 1;
+
+  return i;
+}
+
 void chunk_list_remove(chunk_list_t *list, size_t index) {
-  while (index < list->count) {
+  while (index < list->count - 1) {
     memmove(&list->chunks[index], &list->chunks[index + 1], sizeof(chunk_t));
     index += 1;
   }
   list->count -= 1;
+}
+
+void chunk_list_try_merge(chunk_list_t *list, size_t index) {
+  if (index > 0) {
+    const chunk_t current = list->chunks[index];
+    const chunk_t prev = list->chunks[index - 1];
+    if (prev.start + prev.size == current.start) {
+      list->chunks[index - 1].size += current.size;
+      chunk_list_remove(list, index);
+      index -= 1;
+    }
+  }
+
+  if (index < list->count - 1) {
+    const chunk_t current = list->chunks[index];
+    const chunk_t next = list->chunks[index + 1];
+    if (current.start + current.size == next.start) {
+      list->chunks[index].size += next.size;
+      chunk_list_remove(list, index + 1);
+    }
+  }
+}
+
+int chunk_list_b_search(const chunk_list_t *list, char *ptr) {
+  if (list->count == 0) {
+    return -1;
+  }
+
+  size_t min = 0;
+  size_t max = list->count - 1;
+  int index = min + (int)roundf(((float)(max - min)) / 2);
+
+  while (index >= 0 && index < (int)list->count) {
+    if (list->chunks[index].start == ptr) {
+      return index;
+    } else if (list->chunks[index].start > ptr) {
+      max = index;
+    } else if (list->chunks[index].start < ptr) {
+      min = index;
+    }
+
+    index = min + (int)roundf(((float)(max - min)) / 2);
+  }
+
+  return -1;
 }
 
 void *alloc(size_t bytes) {
@@ -52,9 +119,7 @@ void *alloc(size_t bytes) {
       chunk_t current = free_chunks.chunks[i];
       if (current.size >= alloced_size) {
         void *ptr = current.start;
-        alloced_chunks.chunks[alloced_chunks.count].start = current.start;
-        alloced_chunks.chunks[alloced_chunks.count].size = alloced_size;
-        alloced_chunks.count += 1;
+        chunk_list_insert(&alloced_chunks, ptr, alloced_size);
 
         if (current.size > alloced_size) {
           size_t tail = current.size - alloced_size;
@@ -67,20 +132,46 @@ void *alloc(size_t bytes) {
         return ptr;
       }
     }
+
+    printf("[ERROR]: Heap out of memory. Attempt to alloc %zu bytes\n", bytes);
+    printf("Alloced ");
+    chunk_list_dump(&alloced_chunks);
+    printf("Freed ");
+    chunk_list_dump(&free_chunks);
+    exit(1);
   }
 
   return NULL;
 }
 
-void free(void *ptr) { printf("Free %p\n", ptr); }
+void free(void *ptr) {
+  if (ptr == NULL)
+    return;
+
+  int index = chunk_list_b_search(&alloced_chunks, ptr);
+  assert(index >= 0 && "Did not find a matching ptr\n");
+  assert(alloced_chunks.chunks[index].start == ptr);
+
+  const chunk_t chunk_to_free = {.start = alloced_chunks.chunks[index].start,
+                                 .size = alloced_chunks.chunks[index].size};
+
+  int place =
+      chunk_list_insert(&free_chunks, chunk_to_free.start, chunk_to_free.size);
+  chunk_list_try_merge(&free_chunks, place);
+
+  chunk_list_remove(&alloced_chunks, index);
+}
 
 int main() {
-  for (size_t i = 1; i < 20; i++) {
-    void *mem = alloc(i);
-    if (i % 2 == 0)
+  for (size_t i = 1; i < 5; i++) {
+    void *mem = alloc(i * 8);
+    if (i % 2 != 0) {
       free(mem);
+    }
   }
 
+  printf("Alloced ");
   chunk_list_dump(&alloced_chunks);
+  printf("Freed ");
   chunk_list_dump(&free_chunks);
 }
