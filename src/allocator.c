@@ -1,75 +1,183 @@
 #include "allocator.h"
-#include <c++/11/bits/fs_fwd.h>
+#include <math.h>
 #include <stdio.h>
-#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
 
-typedef struct {
-	bool alloced;
-	size_t parent_index;
+#define CHUNK_SIZE 8
+#define CHUNK_NUM 1024
+#define MEMORY_CAP 640000
+
+typedef struct CHUNK {
+  char *start;
+  size_t size;
 } chunk_t;
 
+typedef struct {
+  size_t count;
+  chunk_t chunks[CHUNK_NUM];
+} chunk_list_t;
 
-#define MEM_CHUNKS 1024
-static chunk_t mem_chunks[MEM_CHUNKS] = {0};
-static long memory[MEM_CHUNKS] = {0};
+char memory[MEMORY_CAP] = {0};
+chunk_list_t free_chunks = {
+    .count = 1, .chunks = {[0] = {.start = memory, .size = MEMORY_CAP}}};
 
-void* alloc(size_t bytes) {
-	size_t alloc_chunks = bytes / 8;
-	if (bytes % 8 > 0) {
-		alloc_chunks++;
-	}
+chunk_list_t alloced_chunks = {.count = 0};
 
-	long offset = -1;
-	size_t free_chunks = 0;
-	for(size_t i = 0; i < MEM_CHUNKS; i++) {
-		if (!mem_chunks[i].alloced && free_chunks == 0) {
-			offset = i;
-			free_chunks++;
-		} else if (mem_chunks[i].alloced) {
-			offset = -1;
-			free_chunks = 0;
-		} else {
-			free_chunks++;
-		}
-
-		if (free_chunks == alloc_chunks) {
-			break;
-		}
-	}
-
-	if (offset == -1) {
-		return NULL;
-	}
-
-	for(size_t i = offset; (i - offset) < alloc_chunks; i++) {
-		mem_chunks[i].alloced = true;
-		mem_chunks[i].parent_index = offset;
-	}
-
-	return (void*)memory + offset;
+void chunk_list_dump(const chunk_list_t *list) {
+  printf("Chunks: %zu\n", list->count);
+  for (size_t i = 0; i < list->count; i++) {
+    const chunk_t current = list->chunks[i];
+    printf("#%zu: start: %p, size: %zu\n", i + 1, current.start, current.size);
+  }
 }
 
-void free(void* ptr) {
-	size_t offset = ptr-(void*)memory;
+int chunk_list_insert(chunk_list_t *list, char *start, size_t size) {
+  list->chunks[list->count].start = start;
+  list->chunks[list->count].size = size;
 
-	size_t i = offset;
-	while (mem_chunks[i].alloced && mem_chunks[i].parent_index == offset) {
-		mem_chunks[i].alloced = false;
-		mem_chunks[i].parent_index = 0;
-		memory[i] = 0;
-		i++;
-	}
+  size_t i = list->count;
+  for (; i > 0 && list->chunks[i - 1].start > list->chunks[i].start; i--) {
+    const chunk_t tmp = {.start = list->chunks[i].start,
+                         .size = list->chunks[i].size};
+
+    list->chunks[i].start = list->chunks[i - 1].start;
+    list->chunks[i].size = list->chunks[i - 1].size;
+
+    list->chunks[i - 1].start = tmp.start;
+    list->chunks[i - 1].size = tmp.size;
+  }
+
+  list->count += 1;
+
+  return i;
+}
+
+void chunk_list_remove(chunk_list_t *list, size_t index) {
+  while (index < list->count - 1) {
+    memmove(&list->chunks[index], &list->chunks[index + 1], sizeof(chunk_t));
+    index += 1;
+  }
+  list->count -= 1;
+}
+
+void chunk_list_try_merge(chunk_list_t *list, size_t index) {
+  if (index > 0) {
+    const chunk_t current = list->chunks[index];
+    const chunk_t prev = list->chunks[index - 1];
+    if (prev.start + prev.size == current.start) {
+      list->chunks[index - 1].size += current.size;
+      chunk_list_remove(list, index);
+      index -= 1;
+    }
+  }
+
+  if (index < list->count - 1) {
+    const chunk_t current = list->chunks[index];
+    const chunk_t next = list->chunks[index + 1];
+    if (current.start + current.size == next.start) {
+      list->chunks[index].size += next.size;
+      chunk_list_remove(list, index + 1);
+    }
+  }
+}
+
+int chunk_list_b_search(const chunk_list_t *list, char *ptr) {
+  if (list->count == 0) {
+    return -1;
+  }
+
+  size_t min = 0;
+  size_t max = list->count - 1;
+  int index = min + (int)roundf(((float)(max - min)) / 2);
+
+  while (index >= 0 && index < (int)list->count) {
+    if (list->chunks[index].start == ptr) {
+      return index;
+    } else if (list->chunks[index].start > ptr) {
+      max = index;
+    } else if (list->chunks[index].start < ptr) {
+      min = index;
+    }
+
+    index = min + (int)roundf(((float)(max - min)) / 2);
+  }
+
+  return -1;
+}
+
+void *alloc(size_t bytes) {
+  if (bytes > 0) {
+    size_t chunks = bytes / CHUNK_SIZE;
+
+    if (bytes % CHUNK_SIZE > 0)
+      chunks += 1;
+    size_t alloced_size = chunks * CHUNK_SIZE;
+
+    for (size_t i = 0; i < free_chunks.count; i++) {
+      chunk_t current = free_chunks.chunks[i];
+      if (current.size >= alloced_size) {
+        void *ptr = current.start;
+        chunk_list_insert(&alloced_chunks, ptr, alloced_size);
+
+        if (current.size > alloced_size) {
+          size_t tail = current.size - alloced_size;
+          free_chunks.chunks[i].start = current.start + alloced_size;
+          free_chunks.chunks[i].size = tail;
+        } else {
+          chunk_list_remove(&free_chunks, i);
+        }
+
+        return ptr;
+      }
+    }
+
+    printf("[ERROR]: Heap out of memory. Attempt to alloc %zu bytes\n", bytes);
+    printf("Alloced ");
+    chunk_list_dump(&alloced_chunks);
+    printf("Freed ");
+    chunk_list_dump(&free_chunks);
+    exit(1);
+  }
+
+  return NULL;
+}
+
+void free(void *ptr) {
+  if (ptr == NULL)
+    return;
+
+  int index = chunk_list_b_search(&alloced_chunks, ptr);
+  if (index >= 0) {
+    printf("[ERROR]: Did not find a matching ptr\n");
+    exit(1);
+  }
+  if (alloced_chunks.chunks[index].start == ptr) {
+    printf("[ERROR]: Found chunk did not match ptr\n");
+    exit(1);
+  }
+
+  const chunk_t chunk_to_free = {.start = alloced_chunks.chunks[index].start,
+                                 .size = alloced_chunks.chunks[index].size};
+
+  int place =
+      chunk_list_insert(&free_chunks, chunk_to_free.start, chunk_to_free.size);
+  chunk_list_try_merge(&free_chunks, place);
+
+  chunk_list_remove(&alloced_chunks, index);
 }
 
 int main() {
-	printf("memory: %p, size: %zu\n", memory, sizeof(memory));
+  for (size_t i = 1; i < 5; i++) {
+    void *mem = alloc(i * 8);
+    if (i % 2 != 0) {
+      free(mem);
+    }
+  }
 
-	void* mem1 = alloc(24);
-	alloc(20);
-	free(mem1);
-	alloc(18);
-	void* mem = alloc(16);
-	alloc(8);
-	free(mem);
-	alloc(34);
+  printf("Alloced ");
+  chunk_list_dump(&alloced_chunks);
+  printf("Freed ");
+  chunk_list_dump(&free_chunks);
 }
