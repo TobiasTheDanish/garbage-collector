@@ -1,5 +1,5 @@
 #include "allocator.h"
-#include <stdbool.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -149,8 +149,14 @@ void free(void *ptr) {
     return;
 
   int index = chunk_list_b_search(&alloced_chunks, ptr);
-  assert(index >= 0 && "Did not find a matching ptr\n");
-  assert(alloced_chunks.chunks[index].start == ptr);
+  if (index >= 0) {
+    printf("[ERROR]: Did not find a matching ptr\n");
+    exit(1);
+  }
+  if (alloced_chunks.chunks[index].start == ptr) {
+    printf("[ERROR]: Found chunk did not match ptr\n");
+    exit(1);
+  }
 
   const chunk_t chunk_to_free = {.start = alloced_chunks.chunks[index].start,
                                  .size = alloced_chunks.chunks[index].size};
