@@ -33,3 +33,10 @@ run:
 	make
 	clear
 	./$(EXEC)
+
+asm: $(SOURCES)
+	$(CC) -S -o $(EXEC).s $^
+
+shared: $(SOURCES)
+	$(CC) -o $(EXEC).o -fPIC $^ 
+

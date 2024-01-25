@@ -1,5 +1,5 @@
 #include "allocator.h"
-#include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,7 +10,7 @@
 #define MEMORY_CAP 640000
 
 typedef struct CHUNK {
-  char *start;
+  uintptr_t *start;
   size_t size;
 } chunk_t;
 
@@ -19,7 +19,7 @@ typedef struct {
   chunk_t chunks[CHUNK_NUM];
 } chunk_list_t;
 
-char memory[MEMORY_CAP] = {0};
+uintptr_t memory[MEMORY_CAP] = {0};
 chunk_list_t free_chunks = {
     .count = 1, .chunks = {[0] = {.start = memory, .size = MEMORY_CAP}}};
 
@@ -33,7 +33,7 @@ void chunk_list_dump(const chunk_list_t *list) {
   }
 }
 
-int chunk_list_insert(chunk_list_t *list, char *start, size_t size) {
+int chunk_list_insert(chunk_list_t *list, uintptr_t *start, size_t size) {
   list->chunks[list->count].start = start;
   list->chunks[list->count].size = size;
 
@@ -83,14 +83,15 @@ void chunk_list_try_merge(chunk_list_t *list, size_t index) {
   }
 }
 
-int chunk_list_b_search(const chunk_list_t *list, char *ptr) {
+int chunk_list_b_search(const chunk_list_t *list, uintptr_t *ptr) {
   if (list->count == 0) {
     return -1;
   }
 
   size_t min = 0;
   size_t max = list->count - 1;
-  int index = min + (int)roundf(((float)(max - min)) / 2);
+  float diff = max - min;
+  int index = min + (diff / 2);
 
   while (index >= 0 && index < (int)list->count) {
     if (list->chunks[index].start == ptr) {
@@ -101,7 +102,8 @@ int chunk_list_b_search(const chunk_list_t *list, char *ptr) {
       min = index;
     }
 
-    index = min + (int)roundf(((float)(max - min)) / 2);
+    diff = max - min;
+    index = min + (diff / 2);
   }
 
   return -1;
@@ -148,12 +150,14 @@ void free(void *ptr) {
   if (ptr == NULL)
     return;
 
-  int index = chunk_list_b_search(&alloced_chunks, ptr);
-  if (index >= 0) {
+  uintptr_t *uptr = (uintptr_t *)ptr;
+
+  int index = chunk_list_b_search(&alloced_chunks, uptr);
+  if (index < 0) {
     printf("[ERROR]: Did not find a matching ptr\n");
     exit(1);
   }
-  if (alloced_chunks.chunks[index].start == ptr) {
+  if (alloced_chunks.chunks[index].start != uptr) {
     printf("[ERROR]: Found chunk did not match ptr\n");
     exit(1);
   }
@@ -169,10 +173,15 @@ void free(void *ptr) {
 }
 
 int main() {
-  for (size_t i = 1; i < 5; i++) {
-    void *mem = alloc(i * 8);
-    if (i % 2 != 0) {
-      free(mem);
+  size_t ptrs_count = 10;
+  void *ptrs[ptrs_count];
+  for (size_t i = 0; i < ptrs_count; i++) {
+    ptrs[i] = alloc((i + 1) * 8);
+  }
+
+  for (size_t i = 0; i < ptrs_count; i++) {
+    if (i % 4 == 0) {
+      free(ptrs[i]);
     }
   }
 
