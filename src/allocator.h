@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-void* alloc(size_t bytes);
-void free(void* ptr);
+void *alloc(size_t bytes) asm("_alloc");
+void free(void *ptr) asm("_free");
 
 #endif // !ALLOCATOR_H

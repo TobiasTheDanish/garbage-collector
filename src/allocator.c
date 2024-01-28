@@ -1,9 +1,10 @@
 #include "allocator.h"
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
+// #include <stdio.h>
+// #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
+// #include <strings.h>
+// #include <sys/mman.h>
 
 #define CHUNK_SIZE 8
 #define CHUNK_NUM 1024
@@ -25,13 +26,13 @@ chunk_list_t free_chunks = {
 
 chunk_list_t alloced_chunks = {.count = 0};
 
-void chunk_list_dump(const chunk_list_t *list) {
+/* void chunk_list_dump(const chunk_list_t *list) {
   printf("Chunks: %zu\n", list->count);
   for (size_t i = 0; i < list->count; i++) {
     const chunk_t current = list->chunks[i];
     printf("#%zu: start: %p, size: %zu\n", i + 1, current.start, current.size);
   }
-}
+} */
 
 int chunk_list_insert(chunk_list_t *list, uintptr_t *start, size_t size) {
   list->chunks[list->count].start = start;
@@ -135,12 +136,10 @@ void *alloc(size_t bytes) {
       }
     }
 
-    printf("[ERROR]: Heap out of memory. Attempt to alloc %zu bytes\n", bytes);
-    printf("Alloced ");
-    chunk_list_dump(&alloced_chunks);
-    printf("Freed ");
-    chunk_list_dump(&free_chunks);
-    exit(1);
+    /* printf("[ERROR]: Heap out of memory. Attempt to alloc %zu bytes\n",
+    bytes); printf("Alloced "); chunk_list_dump(&alloced_chunks); printf("Freed
+    "); chunk_list_dump(&free_chunks);
+    exit(1);*/
   }
 
   return NULL;
@@ -153,13 +152,16 @@ void free(void *ptr) {
   uintptr_t *uptr = (uintptr_t *)ptr;
 
   int index = chunk_list_b_search(&alloced_chunks, uptr);
-  if (index < 0) {
+  /* if (index < 0) {
     printf("[ERROR]: Did not find a matching ptr\n");
     exit(1);
   }
   if (alloced_chunks.chunks[index].start != uptr) {
     printf("[ERROR]: Found chunk did not match ptr\n");
     exit(1);
+  } */
+  if (index < 0 || alloced_chunks.chunks[index].start != uptr) {
+    return;
   }
 
   const chunk_t chunk_to_free = {.start = alloced_chunks.chunks[index].start,
@@ -172,21 +174,21 @@ void free(void *ptr) {
   chunk_list_remove(&alloced_chunks, index);
 }
 
-int main() {
-  size_t ptrs_count = 10;
-  void *ptrs[ptrs_count];
-  for (size_t i = 0; i < ptrs_count; i++) {
-    ptrs[i] = alloc((i + 1) * 8);
-  }
-
-  for (size_t i = 0; i < ptrs_count; i++) {
-    if (i % 4 == 0) {
-      free(ptrs[i]);
-    }
-  }
-
-  printf("Alloced ");
-  chunk_list_dump(&alloced_chunks);
-  printf("Freed ");
-  chunk_list_dump(&free_chunks);
-}
+// int main() {
+//   size_t ptrs_count = 10;
+//   void *ptrs[ptrs_count];
+//   for (size_t i = 0; i < ptrs_count; i++) {
+//     ptrs[i] = alloc((i + 1) * 8);
+//   }
+//
+//   for (size_t i = 0; i < ptrs_count; i++) {
+//     if (i % 4 == 0) {
+//       free(ptrs[i]);
+//     }
+//   }
+//
+//   printf("Alloced ");
+//   chunk_list_dump(&alloced_chunks);
+//   printf("Freed ");
+//   chunk_list_dump(&free_chunks);
+// }
